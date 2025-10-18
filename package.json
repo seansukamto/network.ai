@@ -1,0 +1,29 @@
+{
+  "name": "event-networking-app",
+  "version": "1.0.0",
+  "description": "Event networking app with QR codes, Neo4j, and AI assistant",
+  "private": true,
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev:backend": "cd apps/backend && npm run dev",
+    "dev:frontend": "cd apps/frontend && npm run dev",
+    "build:backend": "cd apps/backend && npm run build",
+    "build:frontend": "cd apps/frontend && npm run build",
+    "docker:up": "cd docker && docker compose up -d",
+    "docker:down": "cd docker && docker compose down",
+    "docker:kill": "cd docker && docker compose down -v",
+    "db:init": "cd apps/backend && npm run db:init"
+  },
+  "keywords": [
+    "networking",
+    "events",
+    "qr-code",
+    "neo4j",
+    "ai",
+    "embeddings"
+  ]
+}
+

@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Stop and remove all containers, networks, and volumes
+echo "🛑 Stopping and removing all containers..."
+docker compose down -v
+
+echo "✅ All containers stopped and removed!"
+

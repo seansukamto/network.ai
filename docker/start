@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Start all services
+echo "🚀 Starting services..."
+docker compose up -d
+
+echo "⏳ Waiting for services to be ready..."
+sleep 10
+
+echo "✅ Services started!"
+echo ""
+echo "📊 Service URLs:"
+echo "   PostgreSQL: localhost:5432"
+echo "   Neo4j Browser: http://localhost:7474"
+echo "   Backend API: http://localhost:3001"
+echo ""
+echo "To view logs: docker compose logs -f"
+
