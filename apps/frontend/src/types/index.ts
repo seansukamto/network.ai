@@ -15,6 +15,11 @@ export interface User {
   job_title: string;
   bio: string;
   created_at: string;
+  photo_url?: string | null;
+  linkedin_url?: string;
+  twitter_url?: string;
+  website_url?: string;
+  interests?: string;
 }
 
 export interface Attendee extends User {

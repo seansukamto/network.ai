@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { supabaseAdmin, getUserByAuthId } from '../config/supabase';
 import { requireAuth } from './profile';
 import { google } from 'googleapis';
-import { generateText } from '../config/anthropic';
+import { generateText } from '../config/openai';
 
 const router = Router();
 
@@ -274,6 +274,9 @@ router.post('/calendar/create-event', requireAuth, async (req: Request, res: Res
       return res.status(404).json({ error: 'Connection not found' });
     }
 
+    // Extract connection details (Supabase returns nested object)
+    const connectedUser = (connection as any).connection as { name: string; email: string };
+
     // Get Google tokens
     const { data: tokens } = await supabaseAdmin
       .from('oauth_tokens')
@@ -295,7 +298,7 @@ router.post('/calendar/create-event', requireAuth, async (req: Request, res: Res
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
     const event = {
-      summary: title || `Coffee chat with ${connection.connection.name}`,
+      summary: title || `Coffee chat with ${connectedUser.name}`,
       description: notes || `Meeting scheduled via network.ai`,
       location: location || 'TBD',
       start: {
@@ -307,7 +310,7 @@ router.post('/calendar/create-event', requireAuth, async (req: Request, res: Res
         timeZone: 'UTC',
       },
       attendees: [
-        { email: connection.connection.email },
+        { email: connectedUser.email },
       ],
       reminders: {
         useDefault: false,

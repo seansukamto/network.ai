@@ -5,10 +5,11 @@ dotenv.config();
 
 /**
  * Anthropic client instance for Claude AI
+ * NOTE: Not currently in use - app switched to OpenAI GPT-4o-mini
  */
 export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+  apiKey: process.env.ANTHROPIC_API_KEY || 'dummy-key',
+}) as any;
 
 /**
  * Generate a chat completion using Claude
@@ -59,7 +60,7 @@ export const generateText = async (
     }
   );
 
-  const textContent = response.content.find((block) => block.type === 'text');
+  const textContent = response.content.find((block: any) => block.type === 'text');
   return textContent && 'text' in textContent ? textContent.text : '';
 };
 

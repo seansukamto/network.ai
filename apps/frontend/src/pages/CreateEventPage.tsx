@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { eventApi } from '../api/client'
+import { sessionApi } from '../api/client'
 
 /**
  * Create event page
@@ -33,7 +33,7 @@ export default function CreateEventPage() {
     try {
       setLoading(true)
       setError(null)
-      const response = await eventApi.createEvent({
+      const response = await sessionApi.createSession({
         name: formData.name,
         date: formData.date || new Date().toISOString(),
         location: formData.location,

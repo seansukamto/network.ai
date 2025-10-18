@@ -36,14 +36,35 @@ const requireAuth = async (req: Request, res: Response, next: any) => {
 /**
  * GET /api/profile
  * Get current user's profile
+ * Auto-creates profile if it doesn't exist (handles edge cases)
  */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const profile = await getUserByAuthId(user.id);
+    let profile = await getUserByAuthId(user.id);
 
+    // Auto-create profile if it doesn't exist
     if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
+      console.log(`Creating missing profile for user ${user.id}`);
+      
+      const { data, error } = await supabaseAdmin
+        .from('users')
+        .insert({
+          auth_id: user.id,
+          email: user.email,
+          name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error auto-creating profile:', error);
+        return res.status(500).json({ error: 'Failed to create profile' });
+      }
+
+      profile = data;
     }
 
     res.json(profile);

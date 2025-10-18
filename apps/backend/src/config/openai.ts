@@ -28,3 +28,56 @@ export const generateEmbedding = async (text: string): Promise<number[]> => {
   }
 };
 
+/**
+ * Generate a chat completion using GPT-4o-mini
+ * @param messages - Array of messages
+ * @param options - Optional configuration
+ * @returns OpenAI's response
+ */
+export const generateChatCompletion = async (
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: {
+    temperature?: number;
+    maxTokens?: number;
+    responseFormat?: 'text' | 'json_object';
+  }
+) => {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: messages,
+      temperature: options?.temperature ?? 0.7,
+      max_tokens: options?.maxTokens ?? 4096,
+      response_format: options?.responseFormat === 'json_object' 
+        ? { type: 'json_object' } 
+        : undefined,
+    });
+
+    return response;
+  } catch (error) {
+    console.error('Error generating GPT completion:', error);
+    throw error;
+  }
+};
+
+/**
+ * Simple text generation helper
+ */
+export const generateText = async (
+  prompt: string,
+  systemPrompt?: string,
+  temperature: number = 0.7
+): Promise<string> => {
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+  
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
+  }
+  
+  messages.push({ role: 'user', content: prompt });
+
+  const response = await generateChatCompletion(messages, { temperature });
+
+  return response.choices[0]?.message?.content || '';
+};
+

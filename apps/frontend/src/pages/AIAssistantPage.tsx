@@ -46,7 +46,7 @@ export default function AIAssistantPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-4xl font-bold text-gray-900 mb-2">🤖 AI Assistant</h1>
+      <h1 className="text-4xl font-bold text-gray-900 mb-2">AI Assistant</h1>
       <p className="text-gray-600 mb-8">
         Ask questions about the people you've met at events
       </p>

@@ -1,9 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabaseAdmin, getUserByAuthId } from '../config/supabase';
 import { getNeo4jDriver } from '../config/database';
-import { generateEmbedding } from '../config/openai';
-import { anthropic, generateChatCompletion } from '../config/anthropic';
-import { formatToolsForClaude } from '../mcp/mcp-client';
+import { generateEmbedding, generateChatCompletion } from '../config/openai';
 import { AIQueryRequest, AIQueryResponse, AIQueryResult } from '../types';
 import { requireAuth } from './profile';
 
@@ -91,13 +89,13 @@ async function queryRAG(query: string, userId?: string): Promise<AIQueryResponse
       `)
       .in('id', uniqueOwnerIds);
 
-    // Build context for Claude
+    // Build context for GPT
     const context = vectorData.map((v: any) => ({
       text: v.text_content,
       similarity: v.similarity || 0.8,
     }));
 
-    const prompt = `You are an assistant that helps users recall who they met at networking events.
+    const systemPrompt = `You are an assistant that helps users recall who they met at networking events.
 Given the context below, answer the user's query concisely.
 
 Output ONLY valid JSON in this exact format:
@@ -113,20 +111,22 @@ Output ONLY valid JSON in this exact format:
     }
   ],
   "summary": "A brief summary of the findings"
-}
+}`;
 
-Context:
+    const userPrompt = `Context:
 ${context.map((c: any) => `- ${c.text} (relevance: ${c.similarity.toFixed(2)})`).join('\n')}
 
 User query: ${query}`;
 
     const response = await generateChatCompletion(
-      [{ role: 'user', content: prompt }],
-      { temperature: 0.3 }
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      { temperature: 0.3, responseFormat: 'json_object' }
     );
 
-    const textContent = response.content.find((block) => block.type === 'text');
-    const responseText = textContent && 'text' in textContent ? textContent.text : '{}';
+    const responseText = response.choices[0]?.message?.content || '{}';
     
     let aiResponse: { results: any[]; summary: string };
     try {
@@ -157,12 +157,12 @@ User query: ${query}`;
 }
 
 /**
- * Cypher mode: Generate and execute Cypher query using Claude
+ * Cypher mode: Generate and execute Cypher query using GPT
  */
 async function queryCypher(query: string, userId?: string): Promise<AIQueryResponse> {
   try {
-    // Ask Claude to generate Cypher query
-    const prompt = `Convert this natural language query to a Cypher query for Neo4j.
+    // Ask GPT to generate Cypher query
+    const systemPrompt = `You are a Cypher query generator for Neo4j.
 The schema is:
 - Nodes: Person {id, name, email, company, jobTitle, bio}, Event {id, name, date, location}
 - Relationships: (Person)-[:ATTENDED]->(Event), (Person)-[:MET_AT {note, at, eventId}]->(Person)
@@ -172,18 +172,17 @@ Rules:
 - DO NOT use CREATE, DELETE, SET, REMOVE, MERGE, CALL, or any write operations
 - Return relevant Person properties and Event details
 - Limit results to 20
-
-User query: ${query}
-
-Return ONLY the Cypher query, no explanation, no markdown.`;
+- Return ONLY the Cypher query, no explanation, no markdown.`;
 
     const response = await generateChatCompletion(
-      [{ role: 'user', content: prompt }],
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `User query: ${query}` }
+      ],
       { temperature: 0.1 }
     );
 
-    const textContent = response.content.find((block) => block.type === 'text');
-    let cypherQuery = textContent && 'text' in textContent ? textContent.text.trim() : '';
+    let cypherQuery = response.choices[0]?.message?.content?.trim() || '';
     
     // Clean up markdown code blocks if present
     cypherQuery = cypherQuery.replace(/```cypher\n?/g, '').replace(/```\n?/g, '').trim();
