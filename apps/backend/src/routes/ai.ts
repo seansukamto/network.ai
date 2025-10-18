@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { pool, getNeo4jDriver } from '../config/database';
-import { openai, generateEmbedding } from '../config/openai';
+import { supabaseAdmin, getUserByAuthId } from '../config/supabase';
+import { getNeo4jDriver } from '../config/database';
+import { generateEmbedding } from '../config/openai';
+import { anthropic, generateChatCompletion } from '../config/anthropic';
+import { formatToolsForClaude } from '../mcp/mcp-client';
 import { AIQueryRequest, AIQueryResponse, AIQueryResult } from '../types';
+import { requireAuth } from './profile';
 
 const router = Router();
 
@@ -28,28 +32,40 @@ function isSafeCypher(query: string): boolean {
 }
 
 /**
- * RAG mode: Use vector similarity search
+ * RAG mode: Use vector similarity search with Claude
  */
 async function queryRAG(query: string, userId?: string): Promise<AIQueryResponse> {
   try {
     // Generate embedding for the query
     const queryEmbedding = await generateEmbedding(query);
 
-    // Find similar vectors
-    const vectorResult = await pool.query(
-      `SELECT v.id, v.owner_type, v.owner_id, v.text_content,
-              v.embedding <#> $1::vector AS distance
-       FROM vectors v
-       ORDER BY distance
-       LIMIT 20`,
-      [JSON.stringify(queryEmbedding)]
-    );
+    // Find similar vectors in Supabase
+    const { data: vectors, error } = await supabaseAdmin.rpc('match_vectors', {
+      query_embedding: JSON.stringify(queryEmbedding),
+      match_threshold: 0.7,
+      match_count: 20,
+    });
 
-    // Get user details for the matched vectors
-    const ownerIds = vectorResult.rows.map(row => row.owner_id);
-    const uniqueOwnerIds = [...new Set(ownerIds)];
+    if (error) {
+      console.error('Vector search error:', error);
+      // Fallback to simple query
+      const { data: fallbackVectors } = await supabaseAdmin
+        .from('vectors')
+        .select('*')
+        .limit(20);
+      
+      if (!fallbackVectors || fallbackVectors.length === 0) {
+        return {
+          results: [],
+          summary: 'No relevant contacts found.',
+          mode_used: 'rag',
+        };
+      }
+    }
 
-    if (uniqueOwnerIds.length === 0) {
+    const vectorData = vectors || [];
+    
+    if (vectorData.length === 0) {
       return {
         results: [],
         summary: 'No relevant contacts found.',
@@ -57,30 +73,34 @@ async function queryRAG(query: string, userId?: string): Promise<AIQueryResponse
       };
     }
 
-    const usersResult = await pool.query(
-      `SELECT u.*, 
-              (SELECT json_agg(json_build_object('id', e.id, 'name', e.name, 'date', e.date))
-               FROM attendance a
-               JOIN events e ON a.event_id = e.id
-               WHERE a.user_id = u.id) as events
-       FROM users u
-       WHERE u.id = ANY($1)`,
-      [uniqueOwnerIds]
-    );
+    // Get user details
+    const ownerIds = vectorData.map((v: any) => v.owner_id);
+    const uniqueOwnerIds = [...new Set(ownerIds)];
 
-    // Build context for LLM
-    const context = vectorResult.rows.map(row => ({
-      type: row.owner_type,
-      text: row.text_content,
-      distance: row.distance,
+    const { data: users } = await supabaseAdmin
+      .from('users')
+      .select(`
+        *,
+        attendance (
+          session:session_id (
+            id,
+            name,
+            date
+          )
+        )
+      `)
+      .in('id', uniqueOwnerIds);
+
+    // Build context for Claude
+    const context = vectorData.map((v: any) => ({
+      text: v.text_content,
+      similarity: v.similarity || 0.8,
     }));
 
-    const usersMap = new Map(usersResult.rows.map(u => [u.id, u]));
+    const prompt = `You are an assistant that helps users recall who they met at networking events.
+Given the context below, answer the user's query concisely.
 
-    const prompt = `You are an assistant that helps users recall who they met at events.
-Given the context of people and meeting notes below, answer the user's query concisely.
-
-Output ONLY valid JSON in this exact format (no markdown, no code blocks):
+Output ONLY valid JSON in this exact format:
 {
   "results": [
     {
@@ -89,7 +109,6 @@ Output ONLY valid JSON in this exact format (no markdown, no code blocks):
       "company": "Company Name",
       "jobTitle": "Job Title",
       "why": "Brief explanation of why this person matches",
-      "event": {"name": "Event Name"},
       "score": 0.95
     }
   ],
@@ -97,36 +116,31 @@ Output ONLY valid JSON in this exact format (no markdown, no code blocks):
 }
 
 Context:
-${context.map(c => `- ${c.text} (relevance: ${(1 - c.distance).toFixed(2)})`).join('\n')}
+${context.map((c: any) => `- ${c.text} (relevance: ${c.similarity.toFixed(2)})`).join('\n')}
 
 User query: ${query}`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-    });
+    const response = await generateChatCompletion(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.3 }
+    );
 
-    const responseText = completion.choices[0].message.content || '{}';
+    const textContent = response.content.find((block) => block.type === 'text');
+    const responseText = textContent && 'text' in textContent ? textContent.text : '{}';
     
-    // Parse the JSON response
     let aiResponse: { results: any[]; summary: string };
     try {
       aiResponse = JSON.parse(responseText);
     } catch {
-      // If parsing fails, create a basic response
       aiResponse = {
-        results: vectorResult.rows.slice(0, 5).map(row => {
-          const user = usersMap.get(row.owner_id);
-          return user ? {
-            id: user.id,
-            name: user.name,
-            company: user.company || '',
-            jobTitle: user.job_title || '',
-            why: row.text_content.substring(0, 100),
-            score: 1 - row.distance,
-          } : null;
-        }).filter(Boolean),
+        results: (users || []).slice(0, 5).map((user: any) => ({
+          id: user.id,
+          name: user.name,
+          company: user.company || '',
+          jobTitle: user.job_title || '',
+          why: 'Matched based on profile information',
+          score: 0.85,
+        })),
         summary: 'Found relevant contacts based on your query.',
       };
     }
@@ -143,11 +157,11 @@ User query: ${query}`;
 }
 
 /**
- * Cypher mode: Generate and execute Cypher query
+ * Cypher mode: Generate and execute Cypher query using Claude
  */
 async function queryCypher(query: string, userId?: string): Promise<AIQueryResponse> {
   try {
-    // Ask LLM to generate Cypher query
+    // Ask Claude to generate Cypher query
     const prompt = `Convert this natural language query to a Cypher query for Neo4j.
 The schema is:
 - Nodes: Person {id, name, email, company, jobTitle, bio}, Event {id, name, date, location}
@@ -163,13 +177,13 @@ User query: ${query}
 
 Return ONLY the Cypher query, no explanation, no markdown.`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-    });
+    const response = await generateChatCompletion(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.1 }
+    );
 
-    let cypherQuery = completion.choices[0].message.content?.trim() || '';
+    const textContent = response.content.find((block) => block.type === 'text');
+    let cypherQuery = textContent && 'text' in textContent ? textContent.text.trim() : '';
     
     // Clean up markdown code blocks if present
     cypherQuery = cypherQuery.replace(/```cypher\n?/g, '').replace(/```\n?/g, '').trim();
@@ -228,15 +242,24 @@ Return ONLY the Cypher query, no explanation, no markdown.`;
 
 /**
  * POST /api/ai/query
- * Process AI query
+ * Process AI query with Claude and optional MCP tools
  */
-router.post('/query', async (req: Request, res: Response) => {
+router.post('/query', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { query, mode = 'auto', userId }: AIQueryRequest = req.body;
+    const user = (req as any).user;
+    const { query, mode = 'auto', use_mcp = false }: AIQueryRequest & { use_mcp?: boolean } = req.body;
 
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
     }
+
+    // Get user profile
+    const profile = await getUserByAuthId(user.id);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const userId = profile.id;
 
     let response: AIQueryResponse;
 

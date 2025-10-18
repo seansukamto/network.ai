@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "cd apps/frontend && npm install && npm run build",
+  "devCommand": "cd apps/frontend && npm run dev",
+  "installCommand": "npm install --workspaces",
+  "framework": "vite",
+  "outputDirectory": "apps/frontend/dist",
+  "env": {
+    "VITE_API_URL": "@vite-api-url",
+    "VITE_SUPABASE_URL": "@vite-supabase-url",
+    "VITE_SUPABASE_ANON_KEY": "@vite-supabase-anon-key",
+    "VITE_GOOGLE_CLIENT_ID": "@vite-google-client-id"
+  }
+}
+

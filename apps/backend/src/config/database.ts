@@ -34,20 +34,16 @@ export const getNeo4jDriver = (): Driver => {
 
 /**
  * Test database connections
+ * Note: PostgreSQL is now handled by Supabase, so we only test Neo4j here
  */
 export const testConnections = async (): Promise<void> => {
   try {
-    // Test PostgreSQL
-    const pgClient = await pool.connect();
-    console.log('✅ PostgreSQL connected');
-    pgClient.release();
-
     // Test Neo4j
     const driver = getNeo4jDriver();
     await driver.verifyConnectivity();
     console.log('✅ Neo4j connected');
   } catch (error) {
-    console.error('❌ Database connection failed:', error);
+    console.error('❌ Neo4j connection failed:', error);
     throw error;
   }
 };
