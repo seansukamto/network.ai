@@ -118,10 +118,19 @@ router.post('/', async (req: Request, res: Response) => {
       await session.close();
     }
 
-    // Generate and store embedding for the user's bio
-    if (bio && bio.trim()) {
-      try {
-        const embeddingText = `${name} - ${jobTitle || ''} at ${company || ''}. ${bio}`;
+    // Generate and store embedding for semantic search
+    // Create from all available profile data (not just bio)
+    try {
+      const parts = [
+        name,
+        jobTitle && company ? `${jobTitle} at ${company}` : jobTitle || company,
+        bio,
+      ].filter(Boolean);
+
+      const embeddingText = parts.join('. ');
+
+      // Generate if we have any meaningful content
+      if (embeddingText.trim()) {
         const embedding = await generateEmbedding(embeddingText);
         
         await pool.query(
@@ -130,10 +139,12 @@ router.post('/', async (req: Request, res: Response) => {
            ON CONFLICT DO NOTHING`,
           ['person', userId, JSON.stringify(embedding), embeddingText]
         );
-      } catch (error) {
-        console.error('Error generating embedding:', error);
-        // Continue even if embedding fails
+
+        console.log(`✅ Generated vector for ${name} (${userId})`);
       }
+    } catch (error) {
+      console.error('Error generating embedding:', error);
+      // Continue even if embedding fails
     }
 
     res.json({

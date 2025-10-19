@@ -147,26 +147,48 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
       await session.close();
     }
 
-    // Generate and update embedding if bio changed
-    if (bio && bio !== currentProfile.bio) {
+    // Generate and update embedding for semantic search
+    // Create embedding from profile data (even without bio for better search coverage)
+    const profileChanged = 
+      bio !== currentProfile.bio || 
+      name !== currentProfile.name ||
+      job_title !== currentProfile.job_title ||
+      company !== currentProfile.company ||
+      interests !== currentProfile.interests;
+
+    if (profileChanged) {
       try {
-        const embeddingText = `${name} - ${job_title || ''} at ${company || ''}. ${bio}`;
-        const embedding = await generateEmbedding(embeddingText);
+        // Build embedding text from all available profile data
+        const parts = [
+          name,
+          job_title && company ? `${job_title} at ${company}` : job_title || company,
+          bio,
+          interests ? `Interests: ${interests}` : null,
+        ].filter(Boolean);
 
-        // Delete old embedding
-        await supabaseAdmin
-          .from('vectors')
-          .delete()
-          .eq('owner_type', 'person')
-          .eq('owner_id', data.id);
+        const embeddingText = parts.join('. ');
 
-        // Insert new embedding
-        await supabaseAdmin.from('vectors').insert({
-          owner_type: 'person',
-          owner_id: data.id,
-          embedding: JSON.stringify(embedding),
-          text_content: embeddingText,
-        });
+        // Only generate if we have meaningful content
+        if (embeddingText.trim()) {
+          const embedding = await generateEmbedding(embeddingText);
+
+          // Delete old embedding
+          await supabaseAdmin
+            .from('vectors')
+            .delete()
+            .eq('owner_type', 'person')
+            .eq('owner_id', data.id);
+
+          // Insert new embedding
+          await supabaseAdmin.from('vectors').insert({
+            owner_type: 'person',
+            owner_id: data.id,
+            embedding: JSON.stringify(embedding),
+            text_content: embeddingText,
+          });
+
+          console.log(`✅ Generated vector for user ${name} (${data.id})`);
+        }
       } catch (error) {
         console.error('Error updating embedding:', error);
         // Continue even if embedding fails

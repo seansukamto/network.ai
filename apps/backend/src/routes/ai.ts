@@ -212,22 +212,70 @@ Rules:
       const result = await session.run(cypherQuery, { userId });
 
       const results: AIQueryResult[] = result.records.map(record => {
-        const person = record.get('p') || record.toObject();
+        // Convert record to object with all fields
+        const recordObj = record.toObject();
+        
+        // Find person node (try common variable names, then look for any node with person properties)
+        let person: any = null;
+        const personKeys = ['p', 'person', 'p1', 'p2', 'user', 'contact'];
+        
+        for (const key of personKeys) {
+          if (recordObj[key]) {
+            person = recordObj[key];
+            break;
+          }
+        }
+        
+        // If not found by key name, look for object with name/email properties
+        if (!person) {
+          for (const [key, value] of Object.entries(recordObj)) {
+            if (value && typeof value === 'object' && 
+                ('name' in value || 'email' in value || 
+                 (value as any).properties?.name || (value as any).properties?.email)) {
+              person = value;
+              break;
+            }
+          }
+        }
+        
+        // Also check for direct properties in record (some queries return flattened results)
+        if (!person && recordObj['name']) {
+          person = recordObj;
+        }
+        
+        // Find event node if present
+        let eventNode: any = null;
+        const eventKeys = ['e', 'event', 'session', 's'];
+        
+        for (const key of eventKeys) {
+          if (recordObj[key]) {
+            eventNode = recordObj[key];
+            break;
+          }
+        }
+        
+        // Extract properties (handle both node objects and direct properties)
+        const getProperty = (obj: any, prop: string): string => {
+          if (!obj) return '';
+          return obj[prop] || obj.properties?.[prop] || '';
+        };
+        
         return {
-          id: person.id || person.properties?.id || '',
-          name: person.name || person.properties?.name || '',
-          company: person.company || person.properties?.company || '',
-          jobTitle: person.jobTitle || person.properties?.jobTitle || '',
+          id: getProperty(person, 'id'),
+          name: getProperty(person, 'name'),
+          company: getProperty(person, 'company'),
+          jobTitle: getProperty(person, 'jobTitle'),
           why: `Found via graph query`,
-          event: record.has('e') ? {
-            name: record.get('e')?.properties?.name || '',
+          event: eventNode ? {
+            name: getProperty(eventNode, 'name'),
+            date: getProperty(eventNode, 'date'),
           } : undefined,
         };
       });
 
       return {
-        results,
-        summary: `Found ${results.length} matching contact(s) using graph relationships.`,
+        results: results.filter(r => r.name), // Filter out invalid results
+        summary: `Found ${results.filter(r => r.name).length} matching contact(s) using graph relationships.`,
         mode_used: 'cypher',
       };
     } finally {
